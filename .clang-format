@@ -1,0 +1,28 @@
+BasedOnStyle: Google
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeBraces: Attach
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Project headers
+  - Regex: '^"src/.*'
+    Priority: 1
+  # Third-party headers
+  - Regex: '^<(absl|boost|benchmark|gtest|gmock)/.*'
+    Priority: 2
+  # Standard library
+  - Regex: '^<.*>'
+    Priority: 3
+SortIncludes: CaseSensitive
+SpaceAfterCStyleCast: false
+Standard: c++20
+

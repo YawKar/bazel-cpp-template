@@ -1,0 +1,74 @@
+module(
+    name = "bazel-cpp-template",
+    version = "0.0.1",
+)
+
+# base rules
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "platforms", version = "1.0.0")
+
+# tests, benchmarks
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
+bazel_dep(name = "google_benchmark", version = "1.9.5")
+
+# libs
+bazel_dep(name = "abseil-cpp", version = "20260107.1")
+
+# ---------------------------------------------------------------------------
+# Hermetic C++ toolchain -- Bazel owns the compiler, end to end.
+#
+# toolchains_llvm downloads a pinned upstream LLVM release and uses clang, lld
+# and libc++ from it directly. The full release is deliberate: it carries the
+# whole compiler-rt set (including libclang_rt.profile, which `bazel coverage`
+# links) plus llvm-cov, llvm-profdata, llvm-objdump and llvm-mca, so coverage,
+# profiling and disassembly all work without bolting on host tools.
+#
+# A pinned sysroot supplies the libc/kernel headers and crt objects, so the
+# build never reads /usr. That is what makes actions reproducible across
+# machines and therefore remote-cacheable.
+#
+# Note this toolchain routes compiles through a generated cc_wrapper.sh whose
+# shebang is a hardcoded /bin/bash. That is satisfied by running Bazel inside
+# the FHS environment the dev shell provides (see flake.nix) rather than by
+# patching the module.
+# ---------------------------------------------------------------------------
+bazel_dep(name = "toolchains_llvm", version = "1.8.0")
+
+LLVM_VERSION = "22.1.7"
+
+llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
+llvm.toolchain(
+    name = "llvm_toolchain",
+    # Single source of truth for the language standard (exec and target).
+    cxx_standard = {"": "c++20"},
+    llvm_versions = {"": LLVM_VERSION},
+    # Link the libc++ bundled with the LLVM distribution, never a host libstdc++.
+    stdlib = {"": "builtin-libc++"},
+)
+llvm.sysroot(
+    name = "llvm_toolchain",
+    label = "@sysroot_linux_x86_64//sysroot",
+    targets = ["linux-x86_64"],
+)
+use_repo(llvm, "llvm_toolchain")
+
+register_toolchains("@llvm_toolchain//:all")
+
+sysroot = use_repo_rule("@toolchains_llvm//toolchain:sysroot.bzl", "sysroot")
+
+# Chromium's Debian sysroot: old glibc (2.24) so the produced binaries run
+# anywhere, and identical bytes on every host so remote cache hits are shared.
+sysroot(
+    name = "sysroot_linux_x86_64",
+    sha256 = "84656a6df544ecef62169cfe3ab6e41bb4346a62d3ba2a045dc5a0a2ecea94a3",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/toolchain/2202c161310ffde63729f29d27fe7bb24a0bc540/debian_stretch_amd64_sysroot.tar.xz"],
+)
+
+# tooling
+bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
+git_override(
+    module_name = "hedron_compile_commands",
+    # take the latest: https://github.com/hedronvision/bazel-compile-commands-extractor/commits/main
+    commit = "abb61a688167623088f8768cc9264798df6a9d10",
+    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
+)

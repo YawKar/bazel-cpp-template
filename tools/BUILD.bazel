@@ -1,0 +1,2 @@
+# Build tooling: custom rules, aspects, etc.
+# clang-tidy integration runs via compile_commands.json + run-clang-tidy (see CI).

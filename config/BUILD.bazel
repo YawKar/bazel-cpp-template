@@ -1,0 +1,10 @@
+# Config settings for select() branching in BUILD files.
+# Usage: select({"//config:use_pool_allocator": [...], "//conditions:default": [...]})
+#
+# Add config_setting targets here as needed. Example:
+#
+# config_setting(
+#     name = "use_pool_allocator",
+#     define_values = {"allocator": "pool"},
+#     visibility = ["//visibility:public"],
+# )

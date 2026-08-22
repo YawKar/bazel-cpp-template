@@ -1,0 +1,80 @@
+# Doxygen configuration. Run through `just docs` / `just docs-check`.
+#
+# Only settings that differ from the 1.16 defaults are listed. Regenerate the
+# annotated full version with `doxygen -g` if you need to look one up, but do
+# not commit it -- a 2000-line file hides the handful of choices that matter.
+
+PROJECT_NAME           = "bazel-cpp-template"
+PROJECT_BRIEF          = "Hermetic Bazel + Clang C++ project template"
+OUTPUT_DIRECTORY       = docs
+
+# Only the library is public API. Tests and benchmarks are covered by
+# `just test` / `just bench`, and documenting a TEST_F body proves nothing.
+INPUT                  = src
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.cc
+
+# Every example shown in the docs is lifted from a real test with @snippet,
+# never written inline in a comment. Prose examples rot silently; these are
+# compiled and asserted by `bazel test //...`, so an API change breaks the
+# build instead of leaving a plausible lie on the page. A @snippet naming a
+# missing file or marker is a doc error, which WARN_AS_ERROR turns into a
+# failure -- so deleting an example breaks the docs build too.
+EXAMPLE_PATH           = docs/examples
+EXAMPLE_RECURSIVE      = YES
+
+# The point of this setup: an undocumented public API is a build failure, not
+# a page with blank cells. EXTRACT_ALL = YES would paper over exactly that by
+# emitting an entry for every symbol whether or not anyone described it.
+EXTRACT_ALL            = NO
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+
+# FAIL_ON_WARNINGS (rather than YES) finishes the run and reports every
+# problem before exiting non-zero. Plain YES stops at the first one, which
+# turns fixing a docs build into one round trip per warning.
+
+# `///` comments carry the brief; without this each one would need an explicit
+# @brief to be treated as such.
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+
+# C++20. Trailing return types and [[nodiscard]] confuse the built-in parser
+# less when it knows it is not looking at C.
+EXTENSION_MAPPING      = h=C++
+BUILTIN_STL_SUPPORT    = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+
+# doxygen-awesome-css, resolved from the environment so no /nix/store path is
+# baked into a tracked file. The dev shell exports it; see flake.nix.
+HTML_EXTRA_STYLESHEET  = $(DOXYGEN_AWESOME_CSS)/doxygen-awesome.css
+HTML_COLORSTYLE        = LIGHT
+
+# The theme expects these: it restyles the treeview into its sidebar layout,
+# and its own CSS replaces the generated search field and menu bar.
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_COLORSTYLE_HUE    = 209
+HTML_COLORSTYLE_SAT    = 255
+HTML_COLORSTYLE_GAMMA  = 113
+
+# Graphviz is in the dev shell; call graphs are the main reason to have it.
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = NO
+
+# Docs describe the interface, so show what a caller sees.
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+SORT_MEMBER_DOCS       = NO
+
+QUIET                  = YES

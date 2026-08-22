@@ -1,0 +1,139 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+# No compilers are installed on any runner: Bazel downloads and pins its own
+# clang/lld/libc++ (see MODULE.bazel). Nothing here uses gcc.
+#
+# The build jobs deliberately run on bare bazelisk with no Nix. The dev shell
+# runs Bazel inside an FHS environment, so a NixOS developer and a stock Ubuntu
+# runner produce identical action keys and share one cache -- which means CI
+# gains nothing from installing Nix to build, and these jobs double as the
+# guarantee that the Bazel build never grows a Nix dependency.
+#
+# Disk is the binding constraint: the extracted LLVM distribution alone is
+# ~12 GB against a runner's ~14 GB of free space, so every job reclaims the
+# preinstalled SDKs it does not need first.
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: "ASan + UBSan"
+            bazel_flags: "--config=asan"
+          - name: "TSan"
+            bazel_flags: "--config=tsan"
+          - name: "Release"
+            bazel_flags: "--config=release"
+    name: ${{ matrix.config.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          echo "after reclaim:"; df -h / | tail -1
+      - name: Mount bazel cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel-disk
+            ~/.cache/bazelisk
+          key: bazel-${{ matrix.config.name }}-${{ hashFiles('MODULE.bazel.lock', '.bazelrc', '.bazelversion') }}
+          restore-keys: |
+            bazel-${{ matrix.config.name }}-
+      # bazelisk is preinstalled on the runner image and resolves the Bazel
+      # version from .bazelversion.
+      - name: Build
+        run: bazelisk build --config=ci ${{ matrix.config.bazel_flags }} //...
+      - name: Test
+        run: bazelisk test --config=ci ${{ matrix.config.bazel_flags }} //...
+      - name: Disk usage
+        if: always()
+        run: df -h / | tail -1
+  coverage:
+    runs-on: ubuntu-latest
+    name: coverage
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h / | tail -1
+      - name: Mount bazel cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel-disk
+            ~/.cache/bazelisk
+          key: bazel-coverage-${{ hashFiles('MODULE.bazel.lock', '.bazelrc', '.bazelversion') }}
+          restore-keys: |
+            bazel-coverage-
+      - name: Coverage
+        run: |
+          bazelisk coverage --config=ci //...
+          # Copy out from under bazel-out/, which is a symlink into the output
+          # base that upload-artifact will not follow.
+          cp "$(bazelisk info output_path)/_coverage/_coverage_report.dat" coverage.lcov
+          echo "--- summary ---"
+          grep -cE '^SF:' coverage.lcov | xargs -I{} echo "{} source files instrumented"
+      - name: Upload lcov tracefile
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage.lcov
+          if-no-files-found: error
+  checks:
+    runs-on: ubuntu-latest
+    name: format + lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h / | tail -1
+      # ubuntu-24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, which
+      # hands back an unprivileged user namespace with no capabilities in it, so
+      # bubblewrap fails writing uid_map. The dev shell runs Bazel inside an FHS
+      # environment, so this job -- and only this job -- needs the restriction
+      # lifted. Nothing in the Bazel build itself depends on it.
+      - name: Allow unprivileged user namespaces
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          unshare --user --map-root-user true && echo "userns ok"
+      # Only this job needs Nix: it is the single source of truth for tool
+      # versions, so CI runs the same clang-tidy/clang-format/buildifier a
+      # developer and the pre-commit hook run.
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Mount bazel cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel-disk
+            ~/.cache/bazelisk
+          key: bazel-checks-${{ hashFiles('MODULE.bazel.lock', '.bazelrc', '.bazelversion', 'flake.lock') }}
+          restore-keys: |
+            bazel-checks-
+      - name: Format check
+        run: nix develop --command just format-check
+      - name: Lint
+        run: nix develop --command just lint
+      # Fails on undocumented public API, on a @param that names an argument
+      # which no longer exists, and on a @snippet whose marker has gone. The
+      # example code the snippets come from is compiled and asserted by the
+      # build-and-test jobs, so between them the docs cannot drift from the API.
+      - name: Docs
+        run: nix develop --command just docs-check

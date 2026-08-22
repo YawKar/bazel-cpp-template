@@ -1,0 +1,19 @@
+load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+
+# Generate compile_commands.json for clangd / clang-tidy.
+#
+# The extracted commands are self-contained: the toolchain compiles with
+# --sysroot=/dev/null -nostdlibinc and names every include explicitly, so the
+# database points only at Bazel-managed paths. Nothing needs to be injected
+# afterwards, and no host or /nix/store path can leak into it.
+refresh_compile_commands(
+    name = "refresh_compile_commands",
+    targets = {
+        "//src/...": "",
+        "//test/...": "",
+        "//bench/...": "",
+        # The documentation examples are ordinary test code and get the same
+        # clangd and clang-tidy treatment as the rest.
+        "//docs/...": "",
+    },
+)

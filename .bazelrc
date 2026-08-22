@@ -1,0 +1,162 @@
+# ---------------------------------------------------------------------------
+# Hermeticity
+#
+# Everything the build compiles with is downloaded and pinned by Bazel: clang,
+# lld, libc++, compiler-rt, the sysroot, the JDK and every dep (bzlmod).
+# Nothing is read from the host except the source tree, so actions are
+# reproducible across machines and safe to share via a remote cache.
+#
+# Bazel's own FHS assumptions (/bin/bash for the cc wrapper and run_shell
+# actions, and the /bin:/usr/bin:/usr/local/bin action PATH) are satisfied on
+# NixOS by running Bazel inside an FHS environment -- see the `bazel` wrapper in
+# flake.nix. Nothing NixOS-specific reaches this file, and the action
+# environment is identical on every host.
+# ---------------------------------------------------------------------------
+
+# Never fall back to an autodetected host compiler. Without this Bazel probes
+# the PATH for cc/gcc and silently builds a `local_config_cc` toolchain; on a
+# machine without a host compiler that "works" by accident, and on one with gcc
+# it produces cache entries that do not match anyone else's.
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+
+# Scrub the client environment out of action environments (fixed PATH, no
+# LD_LIBRARY_PATH / TMPDIR / locale leakage into action keys).
+build --incompatible_strict_action_env
+
+# Hermetic JDK for the Java-based tooling in the build (proto, etc.).
+build --java_runtime_version=remotejdk_21
+build --tool_java_runtime_version=remotejdk_21
+
+# Locally, keep MODULE.bazel.lock refreshed as deps change. CI flips this to
+# `error` (see :ci below) so a resolution that does not match the committed
+# lockfile fails the build rather than silently drifting.
+common --lockfile_mode=update
+
+# ---------------------------------------------------------------------------
+# Language / diagnostics
+#
+# Warnings are scoped to first-party code: applying -Wconversion & friends
+# globally would drown the build in warnings from googletest/abseil, which we
+# neither own nor want to patch.
+# ---------------------------------------------------------------------------
+build --cxxopt=-std=c++20
+build --host_cxxopt=-std=c++20
+
+# The toolchain puts -stdlib=libc++ on compile actions, where it only affects
+# linking. Clang warns it is unused, and -Werror on first-party code below
+# would turn that into a build failure. The flag is the toolchain's, not ours.
+build --copt=-Wno-unused-command-line-argument
+
+# Enforce that #includes match declared deps. Clang-only feature; the pinned
+# toolchain ships the module maps it needs.
+build --features=layering_check
+
+build --per_file_copt=//src/.*,//test/.*,//bench/.*,//docs/.*@-Wall,-Wextra,-Wpedantic,-Wshadow,-Wconversion,-Werror=return-type
+build --per_file_copt=//src/.*@-Werror
+
+# ---------------------------------------------------------------------------
+# Build configurations
+# ---------------------------------------------------------------------------
+build:release -c opt
+build:release --copt=-O3
+build:release --copt=-DNDEBUG
+build:release --copt=-flto=thin
+build:release --linkopt=-flto=thin
+
+# Assembly inspection, for `just asm` / `just asm-src`. Optimised like a
+# release build, plus debug info so the disassembler can interleave the source
+# lines, and never stripped so symbol names survive.
+#
+# Deliberately without -flto=thin, which :release does use. Under ThinLTO the
+# object files hold bitcode rather than machine code and the optimiser moves
+# code across translation units, so per-function assembly stops corresponding
+# to any one source file -- exactly what you are trying to read. Add
+# --config=release on top if what you need is what actually ships.
+build:asm -c opt
+build:asm --copt=-O3
+build:asm --copt=-DNDEBUG
+build:asm --copt=-g
+build:asm --strip=never
+
+# Opt-in, deliberately NOT part of :release. -march=native bakes the build
+# machine's CPU into the output, which makes artifacts non-portable and
+# poisons the shared cache with host-specific entries.
+build:native --copt=-march=native
+
+# Sanitizers. toolchains_llvm ships the full compiler-rt set, so clang's
+# driver finds the matching runtimes from the pinned distribution.
+build:asan -c dbg
+build:asan --copt=-fsanitize=address,undefined
+build:asan --copt=-fno-omit-frame-pointer
+build:asan --copt=-fno-optimize-sibling-calls
+build:asan --copt=-O1
+build:asan --linkopt=-fsanitize=address,undefined
+build:asan --strip=never
+build:asan --test_env=ASAN_OPTIONS=detect_leaks=1:detect_stack_use_after_return=1:check_initialization_order=1
+build:asan --test_env=UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+
+build:tsan -c dbg
+build:tsan --copt=-fsanitize=thread
+build:tsan --copt=-fno-omit-frame-pointer
+build:tsan --copt=-O1
+build:tsan --linkopt=-fsanitize=thread
+build:tsan --strip=never
+build:tsan --test_env=TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1
+
+build:dbg -c dbg
+build:dbg --copt=-O0
+build:dbg --copt=-g3
+build:dbg --copt=-fno-omit-frame-pointer
+build:dbg --strip=never
+
+# ---------------------------------------------------------------------------
+# Coverage
+#
+# Clang source-based coverage. The pinned LLVM distribution carries
+# libclang_rt.profile plus llvm-cov and llvm-profdata, so this needs nothing
+# from the host. These apply to `bazel coverage` only.
+#
+# --experimental_generate_llvm_lcov makes clang emit real lcov rather than
+# gcov-format, and the instrumentation filter keeps googletest/abseil out of
+# the report -- without it you measure your dependencies too.
+# ---------------------------------------------------------------------------
+coverage --combined_report=lcov
+coverage --experimental_generate_llvm_lcov
+coverage --instrumentation_filter=^//src
+
+# ---------------------------------------------------------------------------
+# Caching
+#
+# Local disk cache by default. The toolchain is hermetic and the action
+# environment is identical on NixOS and on FHS distributions, so these action
+# keys are valid on any machine: pointing --remote_cache at a shared
+# bazel-remote/BuildBuddy instance is all that is needed to share them, and
+# every host lands in the same cache pool.
+#
+# Uncomment (or put in user.bazelrc) to use a shared cache:
+# build:remote-cache --remote_cache=grpc://cache.example.internal:9092
+# build:remote-cache --remote_upload_local_results=true
+# Read-only for untrusted contexts such as fork PRs:
+# build:remote-cache-ro --remote_cache=grpc://cache.example.internal:9092
+# build:remote-cache-ro --remote_upload_local_results=false
+# ---------------------------------------------------------------------------
+build --disk_cache=~/.cache/bazel-disk
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+test --test_output=errors
+test --test_verbose_timeout_warnings
+
+build --verbose_failures
+
+# ---------------------------------------------------------------------------
+# CI
+# ---------------------------------------------------------------------------
+common:ci --lockfile_mode=error
+build:ci --nocache_test_results
+build:ci --keep_going
+build:ci --show_timestamps
+
+# User overrides
+try-import %workspace%/user.bazelrc

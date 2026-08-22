@@ -1,0 +1,15 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+# Documentation examples, built and run as an ordinary test target. This is
+# what keeps @snippet honest: the docs cannot render a call that no longer
+# compiles, because //... would have gone red first.
+cc_test(
+    name = "greet_example",
+    size = "small",
+    srcs = ["greet_example.cc"],
+    deps = [
+        "//src/lib:example",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
