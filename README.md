@@ -176,12 +176,13 @@ where subtle "clangd disagrees with the build" bugs come from. Change one, chang
 the other.
 
 **The sysroot sets a hard floor on which glibc symbols you can use.** The build
-pins Chromium's Debian stretch sysroot (glibc 2.24) so binaries run anywhere. But
-Chromium's sysroots deliberately *demote* every glibc symbol newer than their ABI
-floor from a default version to a non-default one — `copy_file_range` appears as
-`@GLIBC_2.27` where a stock glibc has `@@GLIBC_2.27`. A non-default version cannot
-satisfy a plain undefined reference, so any dependency reaching for a modern glibc
-call fails at link time with:
+pins Chromium's Debian bullseye sysroot (glibc 2.31) so binaries run on any
+still-supported distribution. But Chromium's sysroots deliberately *demote* most
+glibc symbols newer than their ABI floor — 2.26 for bullseye — from a default
+version to a non-default one. 143 of the 2358 exported symbols are demoted:
+`copy_file_range` appears as `@GLIBC_2.27` where a stock glibc has
+`@@GLIBC_2.27`. A non-default version cannot satisfy a plain undefined
+reference, so any dependency reaching for one of them fails at link time with:
 
 ```
 undefined symbol: copy_file_range
@@ -189,10 +190,23 @@ undefined symbol: copy_file_range
 ```
 
 This is not a glibc-version problem and upgrading to a newer Chromium sysroot does
-**not** fix it — the demotion is policy. Concretely, `std::filesystem::copy_file`
-in libc++ calls `copy_file_range`, which is enough to block Google FuzzTest's
-coverage-guided mode. If you hit this, you need a sysroot from somewhere other
-than Chromium.
+**not** fix it — the demotion is policy, and bullseye demotes `copy_file_range`
+just as stretch did. Concretely, `std::filesystem::copy_file` in libc++ calls
+`copy_file_range`, which is enough to block Google FuzzTest's coverage-guided
+mode. If you hit this, you need a sysroot from somewhere other than Chromium.
+
+The demotion list is not simply "everything past the floor" — `memfd_create` is
+`@@GLIBC_2.27`, a default version, and links fine. Check the symbol you actually
+need before assuming it is blocked:
+
+```sh
+llvm-nm -D --defined-only <sysroot>/lib/x86_64-linux-gnu/libc.so.6 | grep -w memfd_create
+```
+
+Bullseye is the newest amd64 sysroot Chromium publishes; the full list lives in
+`build/linux/sysroot_scripts/sysroots.json` in the Chromium tree. Note the
+download URL is content-addressed (`<prefix>/<sha256>`, no filename), which is
+why the hash appears twice in `MODULE.bazel`.
 
 **`--per_file_copt` regexes are unanchored.** `//src/.*` also matches
 `@@protobuf+//src/google/protobuf/...`, because that is a real package in a real

@@ -1,5 +1,5 @@
 module(
-    name = "bazel-cpp-template",
+    name = "cpp-phase1",
     version = "0.0.1",
 )
 
@@ -56,12 +56,21 @@ register_toolchains("@llvm_toolchain//:all")
 
 sysroot = use_repo_rule("@toolchains_llvm//toolchain:sysroot.bzl", "sysroot")
 
-# Chromium's Debian sysroot: old glibc (2.24) so the produced binaries run
-# anywhere, and identical bytes on every host so remote cache hits are shared.
+# Chromium's Debian bullseye sysroot (glibc 2.31): old enough that the produced
+# binaries run on any still-supported distribution, new enough to declare the
+# Linux APIs added since 2016 -- memfd_create landed in glibc 2.27, so the
+# stretch sysroot this replaced could not offer it at all.
+#
+# Identical bytes on every host, so remote cache hits are shared.
+#
+# The URL is content-addressed: Chromium serves these at <prefix>/<sha256> with
+# no filename, so the sha256 below appears twice on purpose. Newer sysroots are
+# listed in build/linux/sysroot_scripts/sysroots.json in the Chromium tree;
+# bullseye is the newest amd64 one published.
 sysroot(
     name = "sysroot_linux_x86_64",
-    sha256 = "84656a6df544ecef62169cfe3ab6e41bb4346a62d3ba2a045dc5a0a2ecea94a3",
-    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/toolchain/2202c161310ffde63729f29d27fe7bb24a0bc540/debian_stretch_amd64_sysroot.tar.xz"],
+    sha256 = "52d61d4446ffebfaa3dda2cd02da4ab4876ff237853f46d273e7f9b666652e1d",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/52d61d4446ffebfaa3dda2cd02da4ab4876ff237853f46d273e7f9b666652e1d"],
 )
 
 # tooling
