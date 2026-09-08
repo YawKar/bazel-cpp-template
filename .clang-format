@@ -25,4 +25,5 @@ IncludeCategories:
 SortIncludes: CaseSensitive
 SpaceAfterCStyleCast: false
 Standard: c++20
+QualifierAlignment: Right
 
