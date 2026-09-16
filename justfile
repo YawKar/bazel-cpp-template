@@ -14,7 +14,7 @@ test *FLAGS:
     bazel test {{ FLAGS }} //...
 [group("Basics")]
 bench target *FLAGS:
-    bazel run {{ FLAGS }} //bench:{{ target }}
+    bazel run --config=asm {{ FLAGS }} //bench:{{ target }}
 
 # Deliberately separate from `test`: coverage instruments the build, so the
 # flags differ and merging the two would make every ordinary `just test`
